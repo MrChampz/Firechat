@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Firechat</string>
+
+    <string name="tx_sign_up">Cadastrar</string>
+    <string name="tx_sign_in">Entrar</string>
+    <string name="tx_sign_out">Sair</string>
+</resources>
