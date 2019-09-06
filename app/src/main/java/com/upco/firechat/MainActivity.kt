@@ -2,6 +2,7 @@ package com.upco.firechat
 
 import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.text.Editable
@@ -26,9 +27,11 @@ import com.google.android.gms.common.api.GoogleApiClient
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageReference
 import kotlinx.android.synthetic.main.activity_main.*
 import kotlinx.android.synthetic.main.item_message.view.*
 
@@ -99,12 +102,27 @@ class MainActivity: AppCompatActivity(), GoogleApiClient.OnConnectionFailedListe
             override fun afterTextChanged(editable: Editable?) {}
         })
 
-        btn_send.setOnClickListener { view ->
-            // Send message on click
+        btn_send.setOnClickListener {
+            val message = Message(
+                null,
+                et_message.text.toString(),
+                username,
+                photoUrl,
+                null /* no image */
+            )
+
+            firebaseDatabaseRef.child(MESSAGES_CHILD)
+                    .push()
+                    .setValue(message)
+
+            et_message.setText("")
         }
 
-        iv_add_message.setOnClickListener { view ->
-            // Select image for image message on click
+        iv_add_message.setOnClickListener {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            intent.type = "image/*"
+            startActivityForResult(intent, REQUEST_IMAGE)
         }
 
         // New child entries
@@ -230,11 +248,75 @@ class MainActivity: AppCompatActivity(), GoogleApiClient.OnConnectionFailedListe
         }
     }
 
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        Log.d(TAG, "onActivityResult: requestCode = $requestCode, resultCode = $resultCode")
+
+        if (requestCode == REQUEST_IMAGE) {
+            if (resultCode == RESULT_OK) {
+                if (data != null) {
+                    val uri = data.data
+                    Log.d(TAG, "Uri: ${uri.toString()}")
+
+                    val tempMessage = Message(
+                        null,
+                        null,
+                        username,
+                        photoUrl,
+                        LOADING_IMAGE_URL
+                    )
+
+                    firebaseDatabaseRef.child(MESSAGES_CHILD)
+                            .push()
+                            .setValue(tempMessage) { error, ref ->
+                                if (error == null) {
+                                    val storageRef = FirebaseStorage.getInstance()
+                                            .getReference(firebaseUser!!.uid)
+                                            .child(ref.key!!)
+                                            .child(uri?.lastPathSegment!!)
+
+                                    putImageInStorage(storageRef, uri, ref.key!!)
+                                } else {
+                                    Log.w(
+                                        TAG,
+                                        "Não é possível salvar a mensagem no banco de dados.",
+                                        error.toException()
+                                    )
+                                }
+                            }
+                }
+            }
+        }
+    }
+
     override fun onConnectionFailed(connectionResult: ConnectionResult) {
         // An unresolvable error has occurred and Google APIs (including Sign-In) will not
         // be available.
         Log.d(TAG, "onConnectionFailed: $connectionResult")
         Toast.makeText(this, "Google Play Services error.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun putImageInStorage(storageRef: StorageReference, uri: Uri, key: String) {
+        storageRef.putFile(uri).addOnCompleteListener(this) { task ->
+            if (task.isSuccessful) {
+                task.result?.metadata?.reference?.downloadUrl?.addOnCompleteListener {
+                    if (it.isSuccessful) {
+                        val message = Message(
+                            null,
+                            null,
+                            username,
+                            photoUrl,
+                            it.result.toString()
+                        )
+
+                        firebaseDatabaseRef.child(MESSAGES_CHILD).child(key)
+                                .setValue(message)
+                    }
+                }
+            } else {
+                Log.w(TAG, "Erro ao fazer upload da imagem.", task.exception)
+            }
+        }
     }
 
     companion object {
